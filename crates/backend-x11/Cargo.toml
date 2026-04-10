@@ -1,0 +1,11 @@
+[package]
+name = "aurora-wall-backend-x11"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+aurora-wall-backend-api = { path = "../backend-api" }

@@ -1,0 +1,16 @@
+[package]
+name = "aurora-wall-cli"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "aurora-wall"
+path = "src/main.rs"
+
+[dependencies]
+aurora-wall-backend-api = { path = "../backend-api" }
+aurora-wall-config = { path = "../config" }
+aurora-wall-daemon = { path = "../daemon" }
+aurora-wall-ipc = { path = "../ipc" }
+aurora-wall-state = { path = "../state" }

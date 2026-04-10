@@ -1,0 +1,26 @@
+[workspace]
+members = [
+    "crates/backend-api",
+    "crates/backend-desktop",
+    "crates/backend-hyprland",
+    "crates/backend-wayland",
+    "crates/backend-x11",
+    "crates/cli",
+    "crates/config",
+    "crates/daemon",
+    "crates/ipc",
+    "crates/media-image",
+    "crates/media-video",
+    "crates/state",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+version = "0.1.0"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unwrap_used = "deny"

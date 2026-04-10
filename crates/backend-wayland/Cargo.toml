@@ -1,0 +1,12 @@
+[package]
+name = "aurora-wall-backend-wayland"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+aurora-wall-backend-api = { path = "../backend-api" }
+aurora-wall-media-image = { path = "../media-image" }

@@ -1,0 +1,22 @@
+pkgname=aurora-wall
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Hyprland-first wallpaper manager for still and live wallpapers"
+arch=('x86_64')
+url="https://local.workspace/aurora-wall"
+license=('MIT')
+depends=('swww' 'mpvpaper' 'mpv')
+makedepends=('cargo')
+source=()
+sha256sums=()
+
+build() {
+  cd "$srcdir"
+  cargo build --release --manifest-path aurora-wall/Cargo.toml -p aurora-wall-cli
+}
+
+package() {
+  cd "$srcdir"
+  install -Dm755 aurora-wall/target/release/aurora-wall "$pkgdir/usr/bin/aurora-wall"
+  install -Dm644 aurora-wall/packaging/aurora-wall.service "$pkgdir/usr/lib/systemd/user/aurora-wall.service"
+}

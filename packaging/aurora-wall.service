@@ -1,0 +1,10 @@
+[Unit]
+Description=aurora-wall restore service
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.cargo/bin/aurora-wall apply --restore
+
+[Install]
+WantedBy=default.target
