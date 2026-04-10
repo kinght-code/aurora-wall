@@ -1,13 +1,15 @@
-use aurora_wall_backend_api::{LoopMode, ScalingMode, TransitionMode, WallpaperKind, WallpaperSpec};
-use aurora_wall_config::{default_config_path, AppConfig};
+use aurora_wall_backend_api::{
+    LoopMode, ScalingMode, TransitionMode, WallpaperKind, WallpaperSpec,
+};
+use aurora_wall_config::{AppConfig, default_config_path};
 use aurora_wall_daemon::{
-    apply_config, arch_install_hint, default_grub_theme_dir, default_plymouth_theme_dir,
-    export_grub_theme, export_plymouth_theme, export_video_poster, install_boot_theme,
-    list_outputs, pkgbuild_template, sync_wal_theme, systemd_user_service, upsert_wallpaper,
-    write_default_config, DaemonStatus, RuntimeStatus,
+    DaemonStatus, RuntimeStatus, apply_config, arch_install_hint, backend_display_name,
+    default_grub_theme_dir, default_plymouth_theme_dir, export_grub_theme, export_plymouth_theme,
+    export_video_poster, install_boot_theme, list_outputs, pkgbuild_template, sync_wal_theme,
+    systemd_user_service, upsert_wallpaper, write_default_config,
 };
 use aurora_wall_ipc::SocketPath;
-use aurora_wall_state::{default_state_path, AppliedState};
+use aurora_wall_state::{AppliedState, default_state_path};
 use std::env;
 use std::path::PathBuf;
 use std::process;
@@ -46,7 +48,7 @@ fn run() -> Result<(), String> {
             return Err(format!(
                 "unknown command: {}. Run `aurora-wall help` for usage.",
                 other
-            ))
+            ));
         }
     }
 
@@ -60,14 +62,24 @@ fn print_help() {
     println!("  show-config [--config PATH]");
     println!("  list-outputs");
     println!("  remove-output --output NAME [--config PATH]");
-    println!("  set-image --output NAME --path FILE [--scaling fill|fit|center] [--transition none|fade] [--config PATH]");
-    println!("  set-video --output NAME --path FILE [--loop infinite|once] [--mute yes|no] [--config PATH]");
+    println!(
+        "  set-image --output NAME --path FILE [--scaling fill|fit|center] [--transition none|fade] [--config PATH]"
+    );
+    println!(
+        "  set-video --output NAME --path FILE [--loop infinite|once] [--mute yes|no] [--config PATH]"
+    );
     println!("  apply [--config PATH] [--restore] [--no-wal] [-v|--verbose]");
     println!("  export-video-poster --video FILE [--output FILE] [--at 00:00:03]");
-    println!("  export-boot-theme --video FILE [--poster FILE] [--grub-dir PATH] [--plymouth-dir PATH] [--title TEXT] [--at 00:00:03]");
+    println!(
+        "  export-boot-theme --video FILE [--poster FILE] [--grub-dir PATH] [--plymouth-dir PATH] [--title TEXT] [--at 00:00:03]"
+    );
     println!("  install-boot-theme [--grub-dir PATH] [--plymouth-dir PATH]");
-    println!("  export-grub-theme [--config PATH] [--theme-dir PATH] [--background FILE] [--title TEXT]");
-    println!("  export-plymouth-theme [--config PATH] [--theme-dir PATH] [--background FILE] [--video FILE] [--title TEXT] [--at 00:00:03]");
+    println!(
+        "  export-grub-theme [--config PATH] [--theme-dir PATH] [--background FILE] [--title TEXT]"
+    );
+    println!(
+        "  export-plymouth-theme [--config PATH] [--theme-dir PATH] [--background FILE] [--video FILE] [--title TEXT] [--at 00:00:03]"
+    );
     println!("  status [--config PATH]");
     println!("  print-service");
     println!("  print-pkgbuild");
@@ -75,10 +87,39 @@ fn print_help() {
 
 fn doctor() -> Result<(), String> {
     let runtime = RuntimeStatus::load(None).map_err(|error| error.to_string())?;
-    println!("backend: hyprland");
-    println!("desktop_session: {}", runtime.environment.desktop_session.as_deref().unwrap_or("unset"));
-    println!("current_desktop: {}", runtime.environment.current_desktop.as_deref().unwrap_or("unset"));
-    println!("wayland_display: {}", runtime.environment.wayland_display.as_deref().unwrap_or("unset"));
+    println!("backend: {}", runtime.selected_backend.as_str());
+    println!(
+        "backend_name: {}",
+        backend_display_name(runtime.selected_backend)
+    );
+    println!(
+        "desktop_session: {}",
+        runtime
+            .environment
+            .desktop_session
+            .as_deref()
+            .unwrap_or("unset")
+    );
+    println!(
+        "current_desktop: {}",
+        runtime
+            .environment
+            .current_desktop
+            .as_deref()
+            .unwrap_or("unset")
+    );
+    println!(
+        "wayland_display: {}",
+        runtime
+            .environment
+            .wayland_display
+            .as_deref()
+            .unwrap_or("unset")
+    );
+    println!(
+        "display: {}",
+        runtime.environment.display.as_deref().unwrap_or("unset")
+    );
     println!(
         "hyprland_instance_signature: {}",
         runtime
@@ -90,7 +131,11 @@ fn doctor() -> Result<(), String> {
     println!("is_hyprland: {}", yes_no(runtime.environment.is_hyprland()));
     println!(
         "live_session_ready: {}",
-        yes_no(runtime.environment.is_live_session_ready())
+        yes_no(
+            runtime
+                .environment
+                .is_live_session_ready(runtime.selected_backend)
+        )
     );
     println!("config_path: {}", runtime.config_path.display());
     println!("state_path: {}", runtime.state_path.display());
@@ -133,10 +178,11 @@ fn show_config(args: Vec<String>) -> Result<(), String> {
 }
 
 fn list_outputs_command() -> Result<(), String> {
-    match list_outputs() {
+    let runtime = RuntimeStatus::load(None).map_err(|error| error.to_string())?;
+    match list_outputs(runtime.selected_backend) {
         Ok(outputs) => {
             if outputs.is_empty() {
-                println!("no outputs reported by hyprctl");
+                println!("no outputs reported by the active backend");
             } else {
                 for output in outputs {
                     println!("{}", output);
@@ -145,7 +191,8 @@ fn list_outputs_command() -> Result<(), String> {
             Ok(())
         }
         Err(error) => Err(format!(
-            "unable to list Hyprland outputs: {}. Run this inside an active Hyprland session.",
+            "unable to list outputs for backend {}: {}",
+            runtime.selected_backend.as_str(),
             error
         )),
     }
@@ -177,7 +224,9 @@ fn set_image(args: Vec<String>) -> Result<(), String> {
     };
     spec.validate()?;
     upsert_wallpaper(&mut config, spec);
-    config.save(&config_path).map_err(|error| error.to_string())?;
+    config
+        .save(&config_path)
+        .map_err(|error| error.to_string())?;
     println!("saved image wallpaper to {}", config_path.display());
     Ok(())
 }
@@ -208,7 +257,9 @@ fn set_video(args: Vec<String>) -> Result<(), String> {
     };
     spec.validate()?;
     upsert_wallpaper(&mut config, spec);
-    config.save(&config_path).map_err(|error| error.to_string())?;
+    config
+        .save(&config_path)
+        .map_err(|error| error.to_string())?;
     println!("saved video wallpaper to {}", config_path.display());
     Ok(())
 }
@@ -218,8 +269,12 @@ fn remove_output(args: Vec<String>) -> Result<(), String> {
     let config_path = config_path_from_args(&args);
     let mut config = AppConfig::load_or_default(&config_path).map_err(|error| error.to_string())?;
     let before = config.wallpapers.len();
-    config.wallpapers.retain(|wallpaper| wallpaper.output != output);
-    config.save(&config_path).map_err(|error| error.to_string())?;
+    config
+        .wallpapers
+        .retain(|wallpaper| wallpaper.output != output);
+    config
+        .save(&config_path)
+        .map_err(|error| error.to_string())?;
     println!(
         "removed {} entries for output {} from {}",
         before.saturating_sub(config.wallpapers.len()),
@@ -241,30 +296,23 @@ fn apply(args: Vec<String>) -> Result<(), String> {
             if verbose {
                 println!(
                     "restoring previous backend={} applied_items={}",
-                    state.last_applied_backend, state.applied_items
+                    state.last_applied_backend,
+                    state.applied_items()
                 );
             }
+            let restore_config = AppConfig {
+                wallpapers: state.wallpapers,
+                ..config.clone()
+            };
+            let report =
+                apply_config(&restore_config, verbose).map_err(|error| error.to_string())?;
+            print_apply_result(report.actions, sync_wal.then_some(&restore_config), verbose)?;
+            return Ok(());
         }
     }
 
-    let actions = apply_config(&config, verbose).map_err(|error| error.to_string())?;
-    let wal_action = if sync_wal {
-        sync_wal_theme(&config, verbose).map_err(|error| error.to_string())?
-    } else {
-        None
-    };
-    if actions.is_empty() {
-        println!("applied");
-    } else if verbose {
-        for action in actions {
-            println!("applied: {}", action);
-        }
-        if let Some(action) = wal_action {
-            println!("applied: {}", action);
-        }
-    } else {
-        println!("applied");
-    }
+    let report = apply_config(&config, verbose).map_err(|error| error.to_string())?;
+    print_apply_result(report.actions, sync_wal.then_some(&config), verbose)?;
     Ok(())
 }
 
@@ -275,18 +323,29 @@ fn status(args: Vec<String>) -> Result<(), String> {
     let state_path = default_state_path();
     let state = AppliedState::load(&state_path).ok();
     let socket = SocketPath::default();
-    let daemon = DaemonStatus::planned();
+    let daemon = DaemonStatus::planned(runtime.selected_backend);
 
     println!("status: {}", daemon.summary());
-    println!("boot_summary: {}", DaemonStatus::boot_summary(&config));
+    println!("backend: {}", daemon.backend().as_str());
+    println!(
+        "boot_summary: {}",
+        DaemonStatus::boot_summary(&config, daemon.backend())
+    );
     println!("ipc_socket: {}", socket.as_path().display());
     println!("config_path: {}", config_path.display());
     println!("state_path: {}", state_path.display());
     println!("configured_wallpapers: {}", config.wallpapers.len());
-    println!("live_session_ready: {}", yes_no(runtime.environment.is_live_session_ready()));
+    println!(
+        "live_session_ready: {}",
+        yes_no(
+            runtime
+                .environment
+                .is_live_session_ready(runtime.selected_backend)
+        )
+    );
     if let Some(state) = state {
         println!("last_applied_backend: {}", state.last_applied_backend);
-        println!("last_applied_items: {}", state.applied_items);
+        println!("last_applied_items: {}", state.applied_items());
     } else {
         println!("last_applied_backend: none");
         println!("last_applied_items: 0");
@@ -324,8 +383,8 @@ fn export_video_poster_command(args: Vec<String>) -> Result<(), String> {
         .unwrap_or_else(|| PathBuf::from("/tmp/aurora-wall-poster.png"));
     let timestamp = optional_flag(&args, "--at").unwrap_or_else(|| "00:00:03".to_string());
 
-    let poster =
-        export_video_poster(PathBuf::from(video).as_path(), &output, &timestamp).map_err(|error| error.to_string())?;
+    let poster = export_video_poster(PathBuf::from(video).as_path(), &output, &timestamp)
+        .map_err(|error| error.to_string())?;
     println!("wrote {}", poster.display());
     Ok(())
 }
@@ -384,10 +443,7 @@ fn install_boot_theme_command(args: Vec<String>) -> Result<(), String> {
 
     let results = install_boot_theme(&grub_dir, &plymouth_dir).map_err(|error| {
         if error.kind() == std::io::ErrorKind::PermissionDenied {
-            format!(
-                "{}. Re-run this command with sudo.",
-                error
-            )
+            format!("{}. Re-run this command with sudo.", error)
         } else {
             error.to_string()
         }
@@ -461,22 +517,48 @@ fn parse_yes_no(input: &str) -> Result<bool, String> {
 }
 
 fn validate_output_if_possible(output: &str) -> Result<(), String> {
-    match list_outputs() {
-        Ok(outputs) if !outputs.is_empty() && !outputs.iter().any(|item| item == output) => Err(
-            format!(
+    let backend = RuntimeStatus::load(None)
+        .map(|runtime| runtime.selected_backend)
+        .unwrap_or(aurora_wall_backend_api::BackendKind::Desktop);
+    match list_outputs(backend) {
+        Ok(outputs) if !outputs.is_empty() && !outputs.iter().any(|item| item == output) => {
+            Err(format!(
                 "unknown output: {}. Available outputs: {}",
                 output,
                 outputs.join(", ")
-            ),
-        ),
+            ))
+        }
         _ => Ok(()),
     }
 }
 
-fn yes_no(value: bool) -> &'static str {
-    if value {
-        "yes"
+fn print_apply_result(
+    actions: Vec<String>,
+    wal_config: Option<&AppConfig>,
+    verbose: bool,
+) -> Result<(), String> {
+    let wal_action = if let Some(config) = wal_config {
+        sync_wal_theme(config, verbose).map_err(|error| error.to_string())?
     } else {
-        "no"
+        None
+    };
+
+    if actions.is_empty() {
+        println!("applied");
+    } else if verbose {
+        for action in actions {
+            println!("applied: {}", action);
+        }
+        if let Some(action) = wal_action {
+            println!("applied: {}", action);
+        }
+    } else {
+        println!("applied");
     }
+
+    Ok(())
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
 }

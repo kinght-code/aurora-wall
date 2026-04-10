@@ -1,4 +1,6 @@
-use aurora_wall_backend_api::{LoopMode, ScalingMode, TransitionMode, WallpaperKind, WallpaperSpec};
+use aurora_wall_backend_api::{
+    LoopMode, ScalingMode, TransitionMode, WallpaperKind, WallpaperSpec,
+};
 use std::env;
 use std::fs;
 use std::io;
@@ -6,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppConfig {
-    pub target_family: &'static str,
-    pub preferred_backend: &'static str,
+    pub target_family: String,
+    pub preferred_backend: String,
     pub restore_on_login: bool,
     pub library_dir: PathBuf,
     pub wallpapers: Vec<WallpaperSpec>,
@@ -16,8 +18,8 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            target_family: "cross-desktop-linux",
-            preferred_backend: "hyprland",
+            target_family: "cross-desktop-linux".to_string(),
+            preferred_backend: "hyprland".to_string(),
             restore_on_login: true,
             library_dir: default_library_dir(),
             wallpapers: Vec::new(),
@@ -46,7 +48,8 @@ impl AppConfig {
 
         let mut body = String::new();
         body.push_str("# aurora-wall config\n");
-        body.push_str("backend=hyprland\n");
+        body.push_str(&format!("target_family={}\n", self.target_family));
+        body.push_str(&format!("backend={}\n", self.preferred_backend));
         body.push_str(&format!("restore_on_login={}\n", self.restore_on_login));
         body.push_str(&format!("library_dir={}\n", self.library_dir.display()));
 
@@ -102,13 +105,16 @@ fn parse_config(raw: &str) -> io::Result<AppConfig> {
 
         match key.trim() {
             "backend" => {
-                if value.trim() != "hyprland" {
+                let backend = value.trim();
+                if aurora_wall_backend_api::BackendKind::parse(backend).is_none() {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "only backend=hyprland is supported in version 1",
+                        format!("unsupported backend: {}", backend),
                     ));
                 }
+                config.preferred_backend = backend.to_string();
             }
+            "target_family" => config.target_family = value.trim().to_string(),
             "restore_on_login" => {
                 config.restore_on_login = parse_bool(value.trim()).ok_or_else(|| {
                     io::Error::new(
@@ -118,12 +124,14 @@ fn parse_config(raw: &str) -> io::Result<AppConfig> {
                 })?;
             }
             "library_dir" => config.library_dir = PathBuf::from(value.trim()),
-            "wallpaper" => config.wallpapers.push(parse_wallpaper(value.trim()).map_err(|msg| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("invalid wallpaper entry on line {}: {}", index + 1, msg),
-                )
-            })?),
+            "wallpaper" => config
+                .wallpapers
+                .push(parse_wallpaper(value.trim()).map_err(|msg| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("invalid wallpaper entry on line {}: {}", index + 1, msg),
+                    )
+                })?),
             _ => {}
         }
     }
@@ -143,7 +151,8 @@ fn parse_wallpaper(raw: &str) -> Result<WallpaperSpec, String> {
         other => return Err(format!("unsupported wallpaper kind: {}", other)),
     };
 
-    let scaling = ScalingMode::parse(fields[3]).ok_or_else(|| "invalid scaling mode".to_string())?;
+    let scaling =
+        ScalingMode::parse(fields[3]).ok_or_else(|| "invalid scaling mode".to_string())?;
     let transition =
         TransitionMode::parse(fields[4]).ok_or_else(|| "invalid transition mode".to_string())?;
     let muted = match fields[5].trim().to_ascii_lowercase().as_str() {
@@ -169,5 +178,62 @@ fn parse_bool(value: &str) -> Option<bool> {
         "true" | "yes" | "1" => Some(true),
         "false" | "no" | "0" => Some(false),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AppConfig, parse_config};
+    use aurora_wall_backend_api::{
+        LoopMode, ScalingMode, TransitionMode, WallpaperKind, WallpaperSpec,
+    };
+    use std::path::PathBuf;
+
+    #[test]
+    fn parses_target_family_and_backend() {
+        let config = parse_config(
+            "# aurora-wall config\n\
+             target_family=cross-desktop-linux\n\
+             backend=wayland\n\
+             restore_on_login=false\n\
+             library_dir=/tmp/walls\n",
+        )
+        .expect("config should parse");
+
+        assert_eq!(config.target_family, "cross-desktop-linux");
+        assert_eq!(config.preferred_backend, "wayland");
+        assert!(!config.restore_on_login);
+        assert_eq!(config.library_dir, PathBuf::from("/tmp/walls"));
+    }
+
+    #[test]
+    fn save_round_trips_wallpapers() {
+        let mut config = AppConfig {
+            target_family: "cross-desktop-linux".to_string(),
+            preferred_backend: "x11".to_string(),
+            restore_on_login: true,
+            library_dir: PathBuf::from("/tmp/lib"),
+            wallpapers: Vec::new(),
+        };
+        config.wallpapers.push(WallpaperSpec {
+            output: "HDMI-1".to_string(),
+            kind: WallpaperKind::Video,
+            path: "/tmp/demo.mp4".to_string(),
+            scaling: ScalingMode::Fill,
+            transition: TransitionMode::None,
+            muted: true,
+            loop_mode: LoopMode::Infinite,
+        });
+
+        let dir = std::env::temp_dir().join(format!("aurora-wall-config-{}", std::process::id()));
+        let path = dir.join("config.conf");
+        config.save(&path).expect("config should save");
+        let loaded = AppConfig::load(&path).expect("config should load");
+
+        assert_eq!(loaded.preferred_backend, "x11");
+        assert_eq!(loaded.wallpapers, config.wallpapers);
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

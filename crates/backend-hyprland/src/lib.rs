@@ -1,5 +1,4 @@
 use aurora_wall_backend_api::{BackendKind, WallpaperBackend};
-use std::env;
 use std::io;
 use std::process::Command;
 
@@ -13,41 +12,6 @@ impl WallpaperBackend for HyprlandBackend {
 
     fn display_name(&self) -> &'static str {
         "Hyprland backend"
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HyprlandEnvironment {
-    pub desktop_session: Option<String>,
-    pub current_desktop: Option<String>,
-    pub wayland_display: Option<String>,
-    pub hyprland_instance_signature: Option<String>,
-}
-
-impl HyprlandEnvironment {
-    pub fn detect() -> Self {
-        Self {
-            desktop_session: env::var("DESKTOP_SESSION").ok(),
-            current_desktop: env::var("XDG_CURRENT_DESKTOP").ok(),
-            wayland_display: env::var("WAYLAND_DISPLAY").ok(),
-            hyprland_instance_signature: env::var("HYPRLAND_INSTANCE_SIGNATURE").ok(),
-        }
-    }
-
-    pub fn is_hyprland(&self) -> bool {
-        self.desktop_session
-            .as_deref()
-            .map(|value| value.eq_ignore_ascii_case("hyprland"))
-            .unwrap_or(false)
-            || self
-                .current_desktop
-                .as_deref()
-                .map(|value| value.eq_ignore_ascii_case("hyprland"))
-                .unwrap_or(false)
-    }
-
-    pub fn is_live_session_ready(&self) -> bool {
-        self.wayland_display.is_some() && self.hyprland_instance_signature.is_some()
     }
 }
 

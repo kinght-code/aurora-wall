@@ -9,6 +9,9 @@ path = "src/lib.rs"
 
 [dependencies]
 aurora-wall-backend-api = { path = "../backend-api" }
+aurora-wall-backend-desktop = { path = "../backend-desktop" }
 aurora-wall-backend-hyprland = { path = "../backend-hyprland" }
+aurora-wall-backend-wayland = { path = "../backend-wayland" }
+aurora-wall-backend-x11 = { path = "../backend-x11" }
 aurora-wall-config = { path = "../config" }
 aurora-wall-state = { path = "../state" }

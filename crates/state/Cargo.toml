@@ -4,6 +4,8 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[dependencies]
+aurora-wall-backend-api = { path = "../backend-api" }
+
 [lib]
 path = "src/lib.rs"
-

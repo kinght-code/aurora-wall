@@ -1,8 +1,8 @@
 # aurora-wall
 
-`aurora-wall` is a Hyprland-first wallpaper manager for Arch Linux with live wallpaper support and matching boot-theme export tools.
+`aurora-wall` is a Linux wallpaper manager with live wallpaper support and matching boot-theme export tools.
 
-It manages local still and video wallpapers, applies them quietly in the background, and can generate matching GRUB and Plymouth themes from the same media. The longer implementation roadmap is in [plan.txt](/home/ahnaf/Documents/wallpaper/plan.txt).
+It manages local still and video wallpapers, applies them quietly in the background, and can generate matching GRUB and Plymouth themes from the same media. Hyprland is the most integrated path today, and the app also detects generic Wayland, X11, and desktop fallback sessions at runtime. The longer implementation roadmap is in [plan.txt](/home/ahnaf/Documents/wallpaper/plan.txt).
 
 ## Quick start
 
@@ -47,6 +47,8 @@ cargo run -q -p aurora-wall-cli -- doctor
 cargo run -q -p aurora-wall-cli -- list-outputs
 ```
 
+`doctor` prints the detected backend, session variables, config path, state path, and available wallpaper tools.
+
 Create a config and assign wallpapers:
 
 ```bash
@@ -73,6 +75,12 @@ Skip `pywal` syncing when needed:
 
 ```bash
 cargo run -q -p aurora-wall-cli -- apply --no-wal
+```
+
+Replay the last successfully applied wallpaper snapshot instead of the current config:
+
+```bash
+cargo run -q -p aurora-wall-cli -- apply --restore
 ```
 
 Useful config commands:
@@ -155,14 +163,14 @@ aurora-wall
 
 ### Commands
 
-- `doctor`: check Hyprland session readiness, detected tools, and active config/state paths.
+- `doctor`: detect the active backend, print session readiness details, and show config/state paths plus available tools.
 - `init-config`: create a default config file in the standard config location or a custom path.
 - `show-config`: print the currently loaded wallpaper configuration.
 - `list-outputs`: list detected monitor/output names from the current session.
 - `remove-output`: remove saved wallpaper entries for an output that no longer exists.
 - `set-image`: assign a still wallpaper to an output and save it into config.
 - `set-video`: assign a live wallpaper video to an output and save it into config.
-- `apply`: apply the saved wallpaper configuration; runs quietly by default, syncs `pywal` automatically when available, and supports `-v` or `--no-wal`.
+- `apply`: apply the saved wallpaper configuration; runs quietly by default, syncs `pywal` automatically when available, supports `-v` or `--no-wal`, and can replay the last applied snapshot with `--restore`.
 - `export-video-poster`: extract a still frame from a video for boot-theme use.
 - `export-boot-theme`: generate poster, GRUB theme, and Plymouth theme from one video input.
 - `install-boot-theme`: install the generated GRUB and Plymouth themes into system boot locations.
@@ -176,8 +184,10 @@ aurora-wall
 
 - Still wallpapers use `swww` or `awww`.
 - Live wallpapers use `mpvpaper` and `mpv`.
+- Backend selection is runtime-based: Hyprland is preferred when available, then generic Wayland, X11, and desktop fallback.
 - If `pywal` is installed, `apply` syncs application theming from the active wallpaper automatically.
 - `apply` is quiet by default and starts live wallpaper playback detached from the terminal.
+- `apply --restore` uses the last successfully applied wallpaper snapshot saved in the state file.
 - Boot theme generation works without root, but installation into GRUB and Plymouth locations requires `sudo`.
 
 ## Project files

@@ -58,7 +58,10 @@ name = "aurora-wall-daemon"
 version = "0.1.0"
 dependencies = [
  "aurora-wall-backend-api",
+ "aurora-wall-backend-desktop",
  "aurora-wall-backend-hyprland",
+ "aurora-wall-backend-wayland",
+ "aurora-wall-backend-x11",
  "aurora-wall-config",
  "aurora-wall-state",
 ]
@@ -78,3 +81,6 @@ version = "0.1.0"
 [[package]]
 name = "aurora-wall-state"
 version = "0.1.0"
+dependencies = [
+ "aurora-wall-backend-api",
+]

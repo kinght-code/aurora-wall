@@ -1,0 +1,1 @@
+/home/ahnaf/Documents/wallpaper/aurora-wall/target/debug/libaurora_wall_backend_desktop.rlib: /home/ahnaf/Documents/wallpaper/aurora-wall/crates/backend-api/src/lib.rs /home/ahnaf/Documents/wallpaper/aurora-wall/crates/backend-desktop/src/lib.rs

@@ -1,9 +1,14 @@
-use aurora_wall_backend_api::{WallpaperBackend, WallpaperKind, WallpaperSpec};
-use aurora_wall_backend_hyprland::{list_monitors, HyprlandBackend, HyprlandEnvironment};
-use aurora_wall_config::{default_config_path, AppConfig};
-use aurora_wall_state::{default_state_path, AppliedState, RestorePolicy};
-use std::fs;
+use aurora_wall_backend_api::{
+    BackendKind, RuntimeEnvironment, WallpaperBackend, WallpaperKind, WallpaperSpec,
+};
+use aurora_wall_backend_desktop::DesktopBackend;
+use aurora_wall_backend_hyprland::{HyprlandBackend, list_monitors};
+use aurora_wall_backend_wayland::WaylandBackend;
+use aurora_wall_backend_x11::X11Backend;
+use aurora_wall_config::{AppConfig, default_config_path};
+use aurora_wall_state::{AppliedState, RestorePolicy, default_state_path};
 use std::env;
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -11,12 +16,14 @@ use std::process::{Command, Stdio};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DaemonStatus {
     phase: String,
+    backend: BackendKind,
 }
 
 impl DaemonStatus {
-    pub fn planned() -> Self {
+    pub fn planned(backend: BackendKind) -> Self {
         Self {
             phase: "ready".to_string(),
+            backend,
         }
     }
 
@@ -24,10 +31,14 @@ impl DaemonStatus {
         &self.phase
     }
 
-    pub fn boot_summary(config: &AppConfig) -> String {
+    pub fn backend(&self) -> BackendKind {
+        self.backend
+    }
+
+    pub fn boot_summary(config: &AppConfig, backend: BackendKind) -> String {
         format!(
             "backend={}, target_family={}, restore_on_login={}, restore_policy={}",
-            HyprlandBackend.kind().as_str(),
+            backend.as_str(),
             config.target_family,
             config.restore_on_login,
             RestorePolicy::default().as_str()
@@ -73,7 +84,8 @@ impl DependencyStatus {
 pub struct RuntimeStatus {
     pub config_path: PathBuf,
     pub state_path: PathBuf,
-    pub environment: HyprlandEnvironment,
+    pub environment: RuntimeEnvironment,
+    pub selected_backend: BackendKind,
     pub dependencies: DependencyStatus,
     pub configured_wallpapers: usize,
 }
@@ -84,11 +96,13 @@ impl RuntimeStatus {
             .map(Path::to_path_buf)
             .unwrap_or_else(default_config_path);
         let config = AppConfig::load_or_default(&config_path)?;
+        let environment = RuntimeEnvironment::detect();
 
         Ok(Self {
             config_path,
             state_path: default_state_path(),
-            environment: HyprlandEnvironment::detect(),
+            selected_backend: environment.detect_backend(Some(&config.preferred_backend)),
+            environment,
             dependencies: DependencyStatus::detect(),
             configured_wallpapers: config.wallpapers.len(),
         })
@@ -105,12 +119,15 @@ pub fn write_default_config(path: &Path) -> io::Result<AppConfig> {
     Ok(config)
 }
 
-pub fn list_outputs() -> io::Result<Vec<String>> {
-    match list_monitors() {
-        Ok(monitors) if !monitors.is_empty() => {
-            Ok(monitors.into_iter().map(|monitor| monitor.name).collect())
-        }
-        _ => list_outputs_via_awww(),
+pub fn list_outputs(backend: BackendKind) -> io::Result<Vec<String>> {
+    match backend {
+        BackendKind::Hyprland => match list_monitors() {
+            Ok(monitors) if !monitors.is_empty() => {
+                Ok(monitors.into_iter().map(|monitor| monitor.name).collect())
+            }
+            _ => list_outputs_via_awww(),
+        },
+        BackendKind::Wayland | BackendKind::Desktop | BackendKind::X11 => list_outputs_via_awww(),
     }
 }
 
@@ -126,17 +143,31 @@ pub fn upsert_wallpaper(config: &mut AppConfig, spec: WallpaperSpec) {
     }
 }
 
-pub fn apply_config(config: &AppConfig, verbose: bool) -> io::Result<Vec<String>> {
+#[derive(Debug, Clone)]
+pub struct ApplyReport {
+    pub backend: BackendKind,
+    pub actions: Vec<String>,
+    pub applied_wallpapers: Vec<WallpaperSpec>,
+}
+
+pub fn apply_config(config: &AppConfig, verbose: bool) -> io::Result<ApplyReport> {
     ensure_library(config)?;
     let mut actions = Vec::new();
-    let available_outputs = list_outputs().unwrap_or_default();
+    let mut applied_wallpapers = Vec::new();
+    let environment = RuntimeEnvironment::detect();
+    let backend = environment.detect_backend(Some(&config.preferred_backend));
+    let available_outputs = list_outputs(backend).unwrap_or_default();
 
     for wallpaper in &config.wallpapers {
         wallpaper
             .validate()
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
 
-        if !available_outputs.is_empty() && !available_outputs.iter().any(|output| output == &wallpaper.output) {
+        if !available_outputs.is_empty()
+            && !available_outputs
+                .iter()
+                .any(|output| output == &wallpaper.output)
+        {
             if verbose {
                 actions.push(format!(
                     "skipped unavailable output {} for {} wallpaper",
@@ -151,14 +182,19 @@ pub fn apply_config(config: &AppConfig, verbose: bool) -> io::Result<Vec<String>
             WallpaperKind::Image => apply_image(wallpaper, verbose)?,
             WallpaperKind::Video => apply_video(wallpaper, verbose)?,
         };
+        applied_wallpapers.push(wallpaper.clone());
         if verbose {
             actions.push(command_line);
         }
     }
 
-    let state = AppliedState::new(HyprlandBackend.kind().as_str(), config.wallpapers.len());
+    let state = AppliedState::new(backend.as_str(), applied_wallpapers.clone());
     state.save(&default_state_path())?;
-    Ok(actions)
+    Ok(ApplyReport {
+        backend,
+        actions,
+        applied_wallpapers,
+    })
 }
 
 fn apply_image(spec: &WallpaperSpec, _verbose: bool) -> io::Result<String> {
@@ -236,10 +272,7 @@ fn apply_image(spec: &WallpaperSpec, _verbose: bool) -> io::Result<String> {
 
     Ok(format!(
         "awww img {} --outputs {} --resize {} --transition-type {}",
-        spec.path,
-        spec.output,
-        resize,
-        transition
+        spec.path, spec.output, resize, transition
     ))
 }
 
@@ -286,14 +319,21 @@ fn apply_video(spec: &WallpaperSpec, verbose: bool) -> io::Result<String> {
 
     Ok(format!(
         "mpvpaper -o \"{}\" {} {}",
-        options_text,
-        spec.output,
-        spec.path
+        options_text, spec.output, spec.path
     ))
 }
 
 pub fn arch_install_hint() -> &'static str {
     "sudo pacman -S swww mpvpaper mpv  # or install awww instead of swww for still images"
+}
+
+pub fn backend_display_name(backend: BackendKind) -> &'static str {
+    match backend {
+        BackendKind::Hyprland => HyprlandBackend.display_name(),
+        BackendKind::Wayland => WaylandBackend.display_name(),
+        BackendKind::X11 => X11Backend.display_name(),
+        BackendKind::Desktop => DesktopBackend.display_name(),
+    }
 }
 
 pub fn systemd_user_service() -> String {
@@ -352,7 +392,11 @@ pub fn default_grub_theme_dir() -> PathBuf {
         .join(".local/share/aurora-wall/grub-theme")
 }
 
-pub fn export_video_poster(video_path: &Path, output_path: &Path, timestamp: &str) -> io::Result<PathBuf> {
+pub fn export_video_poster(
+    video_path: &Path,
+    output_path: &Path,
+    timestamp: &str,
+) -> io::Result<PathBuf> {
     if !video_path.exists() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
@@ -524,7 +568,10 @@ pub fn install_boot_theme(grub_source: &Path, plymouth_source: &Path) -> io::Res
     if !grub_source.exists() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            format!("GRUB theme directory does not exist: {}", grub_source.display()),
+            format!(
+                "GRUB theme directory does not exist: {}",
+                grub_source.display()
+            ),
         ));
     }
     if !plymouth_source.exists() {
@@ -724,12 +771,9 @@ fn parse_magick_pixel(pixel: &str) -> io::Result<(u8, u8, u8)> {
         ));
     }
 
-    let r = parts[0]
-        .trim_end_matches('%');
-    let g = parts[1]
-        .trim_end_matches('%');
-    let b = parts[2]
-        .trim_end_matches('%');
+    let r = parts[0].trim_end_matches('%');
+    let g = parts[1].trim_end_matches('%');
+    let b = parts[2].trim_end_matches('%');
 
     Ok((
         parse_color_channel(parts[0], r)?,
@@ -745,13 +789,19 @@ fn darken(channel: u8, factor: f32) -> u8 {
 fn parse_color_channel(raw: &str, stripped: &str) -> io::Result<u8> {
     if raw.contains('%') {
         let percent = stripped.parse::<f32>().map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidData, format!("invalid percent channel: {}", raw))
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("invalid percent channel: {}", raw),
+            )
         })?;
         return Ok(((percent / 100.0) * 255.0).round().clamp(0.0, 255.0) as u8);
     }
 
     stripped.parse::<u8>().map_err(|_| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("invalid integer channel: {}", raw))
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid integer channel: {}", raw),
+        )
     })
 }
 
@@ -786,9 +836,5 @@ fn list_outputs_via_awww() -> io::Result<Vec<String>> {
 }
 
 fn yes_no(value: bool) -> &'static str {
-    if value {
-        "yes"
-    } else {
-        "no"
-    }
+    if value { "yes" } else { "no" }
 }
