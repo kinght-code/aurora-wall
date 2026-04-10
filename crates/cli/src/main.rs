@@ -3,7 +3,7 @@ use aurora_wall_config::{default_config_path, AppConfig};
 use aurora_wall_daemon::{
     apply_config, arch_install_hint, default_grub_theme_dir, default_plymouth_theme_dir,
     export_grub_theme, export_plymouth_theme, export_video_poster, install_boot_theme,
-    list_outputs, pkgbuild_template, systemd_user_service, upsert_wallpaper,
+    list_outputs, pkgbuild_template, sync_wal_theme, systemd_user_service, upsert_wallpaper,
     write_default_config, DaemonStatus, RuntimeStatus,
 };
 use aurora_wall_ipc::SocketPath;
@@ -62,7 +62,7 @@ fn print_help() {
     println!("  remove-output --output NAME [--config PATH]");
     println!("  set-image --output NAME --path FILE [--scaling fill|fit|center] [--transition none|fade] [--config PATH]");
     println!("  set-video --output NAME --path FILE [--loop infinite|once] [--mute yes|no] [--config PATH]");
-    println!("  apply [--config PATH] [--restore] [-v|--verbose]");
+    println!("  apply [--config PATH] [--restore] [--no-wal] [-v|--verbose]");
     println!("  export-video-poster --video FILE [--output FILE] [--at 00:00:03]");
     println!("  export-boot-theme --video FILE [--poster FILE] [--grub-dir PATH] [--plymouth-dir PATH] [--title TEXT] [--at 00:00:03]");
     println!("  install-boot-theme [--grub-dir PATH] [--plymouth-dir PATH]");
@@ -233,6 +233,7 @@ fn apply(args: Vec<String>) -> Result<(), String> {
     let config_path = config_path_from_args(&args);
     let config = AppConfig::load_or_default(&config_path).map_err(|error| error.to_string())?;
     let verbose = has_flag(&args, "-v") || has_flag(&args, "--verbose");
+    let sync_wal = !has_flag(&args, "--no-wal");
 
     if args.iter().any(|arg| arg == "--restore") {
         let state_path = default_state_path();
@@ -247,10 +248,18 @@ fn apply(args: Vec<String>) -> Result<(), String> {
     }
 
     let actions = apply_config(&config, verbose).map_err(|error| error.to_string())?;
+    let wal_action = if sync_wal {
+        sync_wal_theme(&config, verbose).map_err(|error| error.to_string())?
+    } else {
+        None
+    };
     if actions.is_empty() {
         println!("applied");
     } else if verbose {
         for action in actions {
+            println!("applied: {}", action);
+        }
+        if let Some(action) = wal_action {
             println!("applied: {}", action);
         }
     } else {

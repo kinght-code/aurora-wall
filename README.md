@@ -25,6 +25,12 @@ If you want Plymouth boot themes:
 sudo pacman -S plymouth
 ```
 
+If your dotfiles use `pywal` and you want application theming to follow the wallpaper:
+
+```bash
+sudo pacman -S pywal
+```
+
 Build the app:
 
 ```bash
@@ -55,10 +61,18 @@ Apply the saved setup:
 cargo run -q -p aurora-wall-cli -- apply
 ```
 
-`apply` returns immediately and leaves live wallpaper playback running in the background. Use verbose mode only when you want command details or child-process logs:
+`apply` returns immediately and leaves live wallpaper playback running in the background. If `wal` is installed, it also regenerates your `pywal` theme automatically from the active still wallpaper or from a poster frame of the active video wallpaper.
+
+Use verbose mode only when you want command details or child-process logs:
 
 ```bash
 cargo run -q -p aurora-wall-cli -- apply -v
+```
+
+Skip `pywal` syncing when needed:
+
+```bash
+cargo run -q -p aurora-wall-cli -- apply --no-wal
 ```
 
 Useful config commands:
@@ -128,7 +142,7 @@ aurora-wall
   remove-output --output NAME [--config PATH]
   set-image --output NAME --path FILE [--scaling fill|fit|center] [--transition none|fade] [--config PATH]
   set-video --output NAME --path FILE [--loop infinite|once] [--mute yes|no] [--config PATH]
-  apply [--config PATH] [--restore] [-v|--verbose]
+  apply [--config PATH] [--restore] [--no-wal] [-v|--verbose]
   export-video-poster --video FILE [--output FILE] [--at 00:00:03]
   export-boot-theme --video FILE [--poster FILE] [--grub-dir PATH] [--plymouth-dir PATH] [--title TEXT] [--at 00:00:03]
   install-boot-theme [--grub-dir PATH] [--plymouth-dir PATH]
@@ -148,7 +162,7 @@ aurora-wall
 - `remove-output`: remove saved wallpaper entries for an output that no longer exists.
 - `set-image`: assign a still wallpaper to an output and save it into config.
 - `set-video`: assign a live wallpaper video to an output and save it into config.
-- `apply`: apply the saved wallpaper configuration; runs quietly by default and supports `-v` for verbose output.
+- `apply`: apply the saved wallpaper configuration; runs quietly by default, syncs `pywal` automatically when available, and supports `-v` or `--no-wal`.
 - `export-video-poster`: extract a still frame from a video for boot-theme use.
 - `export-boot-theme`: generate poster, GRUB theme, and Plymouth theme from one video input.
 - `install-boot-theme`: install the generated GRUB and Plymouth themes into system boot locations.
@@ -162,6 +176,7 @@ aurora-wall
 
 - Still wallpapers use `swww` or `awww`.
 - Live wallpapers use `mpvpaper` and `mpv`.
+- If `pywal` is installed, `apply` syncs application theming from the active wallpaper automatically.
 - `apply` is quiet by default and starts live wallpaper playback detached from the terminal.
 - Boot theme generation works without root, but installation into GRUB and Plymouth locations requires `sudo`.
 

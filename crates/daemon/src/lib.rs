@@ -41,6 +41,7 @@ pub struct DependencyStatus {
     pub swww: bool,
     pub awww: bool,
     pub mpvpaper: bool,
+    pub wal: bool,
     pub pkill: bool,
 }
 
@@ -51,6 +52,7 @@ impl DependencyStatus {
             swww: command_exists("swww"),
             awww: command_exists("awww"),
             mpvpaper: command_exists("mpvpaper"),
+            wal: command_exists("wal"),
             pkill: command_exists("pkill"),
         }
     }
@@ -61,6 +63,7 @@ impl DependencyStatus {
             format!("swww={}", yes_no(self.swww)),
             format!("awww={}", yes_no(self.awww)),
             format!("mpvpaper={}", yes_no(self.mpvpaper)),
+            format!("wal={}", yes_no(self.wal)),
             format!("pkill={}", yes_no(self.pkill)),
         ]
     }
@@ -379,6 +382,51 @@ pub fn export_video_poster(video_path: &Path, output_path: &Path, timestamp: &st
     }
 
     Ok(output_path.to_path_buf())
+}
+
+pub fn sync_wal_theme(config: &AppConfig, verbose: bool) -> io::Result<Option<String>> {
+    if !command_exists("wal") {
+        return Ok(None);
+    }
+
+    let source = if let Some(image_wallpaper) = config
+        .wallpapers
+        .iter()
+        .find(|wallpaper| wallpaper.kind == WallpaperKind::Image)
+    {
+        PathBuf::from(&image_wallpaper.path)
+    } else if let Some(video_wallpaper) = config
+        .wallpapers
+        .iter()
+        .find(|wallpaper| wallpaper.kind == WallpaperKind::Video)
+    {
+        export_video_poster(
+            Path::new(&video_wallpaper.path),
+            &PathBuf::from("/tmp/aurora-wall-wal-poster.png"),
+            "00:00:03",
+        )?
+    } else {
+        return Ok(None);
+    };
+
+    let mut command = Command::new("wal");
+    command.arg("-i").arg(&source).stdin(Stdio::null());
+
+    if verbose {
+        command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    } else {
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+    }
+
+    let status = command.status()?;
+    if !status.success() {
+        return Err(io::Error::other(format!(
+            "wal failed while syncing theme from {}",
+            source.display()
+        )));
+    }
+
+    Ok(Some(format!("wal synced from {}", source.display())))
 }
 
 pub fn export_plymouth_theme(
